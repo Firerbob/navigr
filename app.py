@@ -17,6 +17,15 @@ from config import COMPANIES, INITIAL_FLEET, MACRO_FACTORS, COMPANY_FACTORS, COM
 from ai_engine import get_market_briefing, get_company_briefing
 from glossary import GLOSSARY, LEVEL_LABELS, LEVEL_COLORS, search_terms, get_term
 
+SECTOR_COLORS = {
+    "Energi":          {"bg": "#FEF3C7", "text": "#92400E", "border": "#F59E0B"},
+    "Finans":          {"bg": "#DBEAFE", "text": "#1E40AF", "border": "#3B82F6"},
+    "Industri":        {"bg": "#F1F5F9", "text": "#334155", "border": "#94A3B8"},
+    "Sjømat":          {"bg": "#CCFBF1", "text": "#0F766E", "border": "#14B8A6"},
+    "Telekom":         {"bg": "#EDE9FE", "text": "#5B21B6", "border": "#8B5CF6"},
+    "Fornybar energi": {"bg": "#DCFCE7", "text": "#166534", "border": "#22C55E"},
+}
+
 
 # ============================================================
 # SIDEOPPSETT
@@ -383,6 +392,39 @@ def get_price_history(ticker, period="3mo"):
         return None
 
 
+def greeting() -> str:
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        return "God morgen 👋"
+    if 12 <= hour < 18:
+        return "God ettermiddag 👋"
+    if 18 <= hour < 23:
+        return "God kveld 👋"
+    return "Hei 👋"
+
+
+def render_avatar(ticker: str) -> str:
+    co = COMPANIES[ticker]
+    sc = SECTOR_COLORS.get(co.get("sector", ""), {"bg": "#E8DFC8", "text": "#4A4640", "border": "#C8B896"})
+    initials = co.get("logo", ticker[:2])
+    return (
+        f"<div style='width:36px;height:36px;border-radius:50%;"
+        f"background:{sc['bg']};border:1.5px solid {sc['border']};"
+        f"color:{sc['text']};display:flex;align-items:center;justify-content:center;"
+        f"font-family:Fraunces,serif;font-weight:500;font-size:12px;"
+        f"letter-spacing:-0.02em;flex-shrink:0;'>{initials}</div>"
+    )
+
+
+def render_sector_badge(sector: str) -> str:
+    sc = SECTOR_COLORS.get(sector, {"bg": "#E8DFC8", "text": "#4A4640", "border": "#C8B896"})
+    return (
+        f"<span style='display:inline-block;background:{sc['bg']};color:{sc['text']};"
+        f"border:1px solid {sc['border']};padding:2px 9px;border-radius:100px;"
+        f"font-size:11px;font-weight:500;white-space:nowrap;'>{sector}</span>"
+    )
+
+
 def drop_anchor(ticker):
     if ticker not in st.session_state.fleet:
         st.session_state.fleet.append(ticker)
@@ -432,19 +474,24 @@ with st.sidebar:
     <div style='font-family: Fraunces, serif; font-style: italic; font-size: 13px; color: #7A746A; margin-bottom: 24px;'>Forstå aksjer. Naviger selv.</div>
     """, unsafe_allow_html=True)
 
-    if st.button("🏠  Hjem", use_container_width=True, key="nav_home"):
+    _page = st.session_state.current_page
+    if st.button("🏠  Hjem", use_container_width=True, key="nav_home",
+                 type="primary" if _page == "Hjem" else "secondary"):
         navigate_to("Hjem")
         st.rerun()
 
-    if st.button("⚓  Ankerflåten min", use_container_width=True, key="nav_fleet"):
+    if st.button("⚓  Ankerflåten min", use_container_width=True, key="nav_fleet",
+                 type="primary" if _page == "Ankerflåten" else "secondary"):
         navigate_to("Ankerflåten")
         st.rerun()
 
-    if st.button("🔍  Oppdag", use_container_width=True, key="nav_discover"):
+    if st.button("🔍  Oppdag", use_container_width=True, key="nav_discover",
+                 type="primary" if _page == "Oppdag" else "secondary"):
         navigate_to("Oppdag")
         st.rerun()
 
-    if st.button("📖  Ordbok", use_container_width=True, key="nav_glossary"):
+    if st.button("📖  Ordbok", use_container_width=True, key="nav_glossary",
+                 type="primary" if _page == "Ordbok" else "secondary"):
         navigate_to("Ordbok")
         st.session_state.selected_term = None
         st.rerun()
@@ -493,7 +540,7 @@ def render_home():
 
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.markdown("# God morgen 👋")
+        st.markdown(f"# {greeting()}")
         st.markdown("<p style='font-family: Fraunces, serif; font-style: italic; color: #7A746A; font-size: 15px;'>Her er det som rører seg i ankerflåten din i dag</p>", unsafe_allow_html=True)
     with col_b:
         st.markdown(f"<div style='text-align:right; color:#7A746A; font-family:JetBrains Mono, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; padding-top:30px;'>{date_str.upper()}</div>", unsafe_allow_html=True)
@@ -525,20 +572,14 @@ def render_home():
 
 def render_fleet_table(tickers, allow_remove=True):
     """Renderer en tabell over selskaper med kursdata."""
-    # Header
-    header_cols = st.columns([0.4, 2.2, 1.3, 1.3, 1.1, 1.6])
-    with header_cols[0]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>⚓</div>", unsafe_allow_html=True)
-    with header_cols[1]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Selskap</div>", unsafe_allow_html=True)
-    with header_cols[2]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Sektor</div>", unsafe_allow_html=True)
-    with header_cols[3]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Kurs</div>", unsafe_allow_html=True)
-    with header_cols[4]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Endring</div>", unsafe_allow_html=True)
-    with header_cols[5]:
-        st.markdown("<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A; text-align: right;'>Handling</div>", unsafe_allow_html=True)
+    _lbl = "<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;padding-bottom:4px;'>{}</div>"
+    header_cols = st.columns([0.55, 2.2, 1.4, 1.2, 1.1, 1.6])
+    with header_cols[0]: st.markdown(_lbl.format(""), unsafe_allow_html=True)
+    with header_cols[1]: st.markdown(_lbl.format("Selskap"), unsafe_allow_html=True)
+    with header_cols[2]: st.markdown(_lbl.format("Sektor"), unsafe_allow_html=True)
+    with header_cols[3]: st.markdown(_lbl.format("Kurs"), unsafe_allow_html=True)
+    with header_cols[4]: st.markdown(_lbl.format("Endring"), unsafe_allow_html=True)
+    with header_cols[5]: st.markdown(_lbl.format("&nbsp;"), unsafe_allow_html=True)
 
     st.markdown("<hr style='margin: 5px 0; border-color: #E8DFC8;'>", unsafe_allow_html=True)
 
@@ -548,18 +589,20 @@ def render_fleet_table(tickers, allow_remove=True):
         cls = pill_class(pct)
         is_anchored = ticker in st.session_state.fleet
 
-        cols = st.columns([0.4, 2.2, 1.3, 1.3, 1.1, 1.6])
+        cols = st.columns([0.55, 2.2, 1.4, 1.2, 1.1, 1.6])
 
         with cols[0]:
-            icon = "⚓" if is_anchored else "○"
-            opacity = "1" if is_anchored else "0.4"
-            st.markdown(f"<div style='font-size: 18px; opacity: {opacity};'>{icon}</div>", unsafe_allow_html=True)
+            st.markdown(render_avatar(ticker), unsafe_allow_html=True)
 
         with cols[1]:
-            st.markdown(f"<div class='tick-name'>{ticker}</div><div class='tick-sub'>{co['name']}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='tick-name'>{ticker}</div>"
+                f"<div class='tick-sub'>{co['name']}</div>",
+                unsafe_allow_html=True,
+            )
 
         with cols[2]:
-            st.markdown(f"<div style='font-size: 13px; color: #7A746A;'>{co['sector']}</div>", unsafe_allow_html=True)
+            st.markdown(render_sector_badge(co["sector"]), unsafe_allow_html=True)
 
         with cols[3]:
             st.markdown(f"<div class='price-text'>{format_price(price)} kr</div>", unsafe_allow_html=True)
@@ -800,12 +843,15 @@ def render_company():
 
     with col_left:
         st.markdown(f"""
-        <div style='font-family: JetBrains Mono, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A; margin-bottom: 8px;'>
-            Ankerflåten / {co['sector']} / {co['name'].split(' ')[0]}
-        </div>
-        <h1 style='margin: 0;'>{co['name']}</h1>
-        <div style='font-family: JetBrains Mono, monospace; font-size: 12px; color: #7A746A; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px;'>
-            {ticker} · OSLO BØRS · {co['sector']}
+        <div style='display:flex;align-items:center;gap:14px;margin-bottom:12px;'>
+            {render_avatar(ticker).replace("width:36px;height:36px", "width:52px;height:52px").replace("font-size:12px", "font-size:16px")}
+            <div>
+                <div style='font-family:JetBrains Mono,monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;margin-bottom:4px;'>
+                    Ankerflåten / {ticker} · OSLO BØRS
+                </div>
+                <h1 style='margin:0;'>{co['name']}</h1>
+                <div style='margin-top:8px;'>{render_sector_badge(co['sector'])}</div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -851,7 +897,7 @@ def render_company():
 
     info_cols = st.columns(4)
     with info_cols[0]:
-        st.markdown(f"<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Sektor</div><div style='font-family: Fraunces, serif; font-size: 16px; font-weight: 500;'>{co['sector']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;margin-bottom:6px;'>Sektor</div>{render_sector_badge(co['sector'])}", unsafe_allow_html=True)
     with info_cols[1]:
         st.markdown(f"<div style='font-family: JetBrains Mono, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #7A746A;'>Hovedkontor</div><div style='font-family: Fraunces, serif; font-size: 16px; font-weight: 500;'>{co['hq']}</div>", unsafe_allow_html=True)
     with info_cols[2]:
