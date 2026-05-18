@@ -83,18 +83,18 @@ def get_market_briefing(market_data: list | None = None) -> str:
                     f"{d['price']:.2f} kr  {sign}{d['pct']:.2f}% i dag"
                 )
         if lines:
-            data_text = "\n\nAktuelle kursdata hentet akkurat nå:\n" + "\n".join(lines)
+            data_text = "\n\nAktuella kursdata hämtade just nu:\n" + "\n".join(lines)
 
-    prompt = f"""Du er Ai ai - en AI-finansassistent som gir daglige markedsoppsummeringer for Oslo Børs til norske investorer.{data_text}
+    prompt = f"""Du är Ai ai - en AI-finansassistent som ger dagliga marknadssammanfattningar för Oslo Børs till svenska investerare.{data_text}
 
-Skriv en kort (80-120 ord), informativ oppsummering på norsk som dekker:
-- Hvilke selskaper og sektorer som stiger eller faller mest i dag (bruk tallene over)
-- En makrofaktor som sannsynlig påvirker dagens bevegelser (olje, rente, valuta, etc.)
-- Eventuelle mønstre på tvers av sektorene
+Skriv en kort (80-120 ord), informativ sammanfattning på svenska som täcker:
+- Vilka bolag och sektorer som stiger eller faller mest idag (använd siffrorna ovan)
+- En makrofaktor som sannolikt påverkar dagens rörelser (olja, ränta, valuta, etc.)
+- Eventuella mönster tvärs över sektorerna
 
-Skriv som erfaren finansjournalist - informativ, presis, ikke sensasjonell.
-Ikke bruk overskrift. Bare løpende tekst.
-{"Basér analysen på kursdata oppgitt over — dette er ekte tall." if data_text else "Ingen kursdata tilgjengelig — gi en generell kommentar om Oslo Børs i dag."}"""
+Skriv som en erfaren finansjournalist - informativ, precis, inte sensationell.
+Använd inte rubrik. Bara löpande text.
+{"Basera analysen på kursdata angivna ovan — detta är riktiga siffror." if data_text else "Inga kursdata tillgängliga — ge en allmän kommentar om Oslo Børs idag."}"""
 
     try:
         response = client.messages.create(
@@ -106,7 +106,7 @@ Ikke bruk overskrift. Bare løpende tekst.
         _save_cache(cache_key, text)
         return text
     except Exception as e:
-        return f"(Ai ai kunne ikke generere markedsoppsummering akkurat nå: {e})"
+        return f"(Ai ai kunde inte generera marknadssammanfattning just nu: {e})"
 
 
 # ============================================================
@@ -134,7 +134,7 @@ def get_company_briefing(
     price_text = ""
     if price is not None and pct is not None:
         sign = "+" if pct > 0 else ""
-        price_text = f"\n\nAktuelle kursdata: {price:.2f} kr  ({sign}{pct:.2f}% i dag)"
+        price_text = f"\n\nAktuella kursdata: {price:.2f} kr  ({sign}{pct:.2f}% idag)"
 
     try:
         from config import MACRO_FACTORS, COMPANY_FACTORS
@@ -142,25 +142,25 @@ def get_company_briefing(
         company = COMPANY_FACTORS.get(ticker, [])
         factors_text = ""
         if macro or company:
-            factors_text = "\n\nViktige faktorer å hensynta:\n"
+            factors_text = "\n\nViktiga faktorer att beakta:\n"
             for f in (macro + company)[:6]:
                 factors_text += f"- {f['text']}: {f['sub']} (effekt: {f['impact']})\n"
     except Exception:
         factors_text = ""
 
-    grounded = "Basér analysen på kursdata oppgitt over — dette er ekte tall." if price_text else ""
+    grounded = "Basera analysen på kursdata angivna ovan — detta är riktiga siffror." if price_text else ""
 
-    prompt = f"""Du er Ai ai - en AI-finansanalytiker som gir kortfattede selskapsoppdateringer til norske investorer.
+    prompt = f"""Du är Ai ai - en AI-finansanalytiker som ger kortfattade bolagsuppdateringar till svenska investerare.
 
-Generer en kort (70-110 ord) analyse på norsk for {name} ({ticker}) som handles på Oslo Børs i sektoren {sector}.{price_text}{factors_text}
+Generera en kort (70-110 ord) analys på svenska för {name} ({ticker}) som handlas på Oslo Børs i sektorn {sector}.{price_text}{factors_text}
 
-Oppsummeringen skal:
-- Kommentere dagens kursutvikling konkret (bruk tallene over)
-- Nevne én eller to sannsynlige drivere bak bevegelsen
-- Identifisere én hovedrisiko brukeren bør være oppmerksom på
-- Ha en informativ, rolig tone - ikke sensasjonell
+Sammanfattningen ska:
+- Kommentera dagens kursutveckling konkret (använd siffrorna ovan)
+- Nämna en eller två sannolika drivkrafter bakom rörelsen
+- Identifiera en huvudrisk som användaren bör vara medveten om
+- Ha en informativ, lugn ton - inte sensationell
 
-Ikke bruk overskrift. Bare løpende tekst. {grounded}"""
+Använd inte rubrik. Bara löpande text. {grounded}"""
 
     try:
         response = client.messages.create(
@@ -172,4 +172,4 @@ Ikke bruk overskrift. Bare løpende tekst. {grounded}"""
         _save_cache(cache_key, text)
         return text
     except Exception as e:
-        return f"(Ai ai kunne ikke generere analyse for {ticker} akkurat nå: {e})"
+        return f"(Ai ai kunde inte generera analys för {ticker} just nu: {e})"
