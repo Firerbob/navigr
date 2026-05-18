@@ -392,6 +392,41 @@ def get_price_history(ticker, period="3mo"):
         return None
 
 
+@st.cache_data(ttl=3600)
+def get_fundamentals(yahoo_ticker):
+    """Henter nøkkeltall fra Yahoo Finance (cache 1 time)."""
+    try:
+        return yf.Ticker(yahoo_ticker).info or {}
+    except Exception:
+        return {}
+
+
+def _fmt_mrd(val, currency=""):
+    if val is None:
+        return "—"
+    mrd = val / 1_000_000_000
+    s = f"{mrd:,.1f}".replace(",", " ").replace(".", ",")
+    return f"{s} mrd {currency}".strip()
+
+
+def _fmt_x(val):
+    if val is None or val != val:
+        return "—"
+    return f"{val:.1f}x".replace(".", ",")
+
+
+def _fmt_pct(val):
+    if val is None or val != val:
+        return "—"
+    return f"{val * 100:.1f} %".replace(".", ",")
+
+
+def _fmt_ratio(val):
+    if val is None or val != val:
+        return "—"
+    return f"{val:.2f}".replace(".", ",")
+
+
 def greeting() -> str:
     hour = datetime.now().hour
     if 5 <= hour < 12:
@@ -941,27 +976,31 @@ def render_company():
 
 
 def render_key_metrics(ticker):
-    """Renderer nøkkeltall med klikkbar forklaringer fra ordboken."""
+    """Renderer nøkkeltall med ekte data fra yfinance."""
+    co = COMPANIES[ticker]
+    with st.spinner("Henter nøkkeltall..."):
+        info = get_fundamentals(co["yahoo_ticker"])
+
+    currency = info.get("currency", "")
     st.markdown("<p style='color: #7A746A; font-size: 13px; margin-bottom: 16px;'>💡 Klikk på et nøkkeltall for å lese hva det betyr i ordboken.</p>", unsafe_allow_html=True)
 
-    # Eksempeldata (i en ekte versjon ville disse kommet fra yfinance .info)
     metrics_left = [
-        ("Markedsverdi", "892 mrd", "mcap"),
-        ("P/E", "7,4x", "pe"),
-        ("P/B", "1,8x", "pb"),
-        ("EV/EBITDA", "3,2x", "evebitda"),
-        ("Utbytte", "8,2 %", "utbytte"),
-        ("ROE", "22,1 %", "roe"),
-        ("Gjeldsgrad", "0,34", "gjeldsgrad"),
+        ("Markedsverdi",  _fmt_mrd(info.get("marketCap"), currency),          "mcap"),
+        ("P/E",           _fmt_x(info.get("trailingPE")),                      "pe"),
+        ("P/B",           _fmt_x(info.get("priceToBook")),                     "pb"),
+        ("EV/EBITDA",     _fmt_x(info.get("enterpriseToEbitda")),              "evebitda"),
+        ("Utbytte",       _fmt_pct(info.get("dividendYield")),                 "utbytte"),
+        ("ROE",           _fmt_pct(info.get("returnOnEquity")),                "roe"),
+        ("Gjeldsgrad",    _fmt_ratio(info.get("debtToEquity")),                "gjeldsgrad"),
     ]
 
     metrics_right = [
-        ("Omsetning (Q4)", "24,3 mrd USD", "omsetning"),
-        ("EBITDA (Q4)", "10,8 mrd USD", "ebitda"),
-        ("Netto resultat", "2,1 mrd USD", "nettoresultat"),
-        ("EPS", "0,68 USD", "eps"),
-        ("Mot konsensus", "+12 %", "konsensus"),
-        ("Fri kontantstrøm", "4,2 mrd USD", "kontantstrom"),
+        ("Omsetning (TTM)",      _fmt_mrd(info.get("totalRevenue"), currency),      "omsetning"),
+        ("EBITDA (TTM)",         _fmt_mrd(info.get("ebitda"), currency),            "ebitda"),
+        ("Netto resultat (TTM)", _fmt_mrd(info.get("netIncomeToCommon"), currency), "nettoresultat"),
+        ("EPS (TTM)",            f"{info.get('trailingEps', '—')} {currency}" if info.get("trailingEps") else "—", "eps"),
+        ("52-ukers høy",         f"{info.get('fiftyTwoWeekHigh', '—')} {currency}" if info.get("fiftyTwoWeekHigh") else "—", "konsensus"),
+        ("Fri kontantstrøm",     _fmt_mrd(info.get("freeCashflow"), currency),      "kontantstrom"),
     ]
 
     col_left, col_right = st.columns(2)
@@ -972,7 +1011,7 @@ def render_key_metrics(ticker):
             render_metric_row(label, value, term_key)
 
     with col_right:
-        st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 18px; margin-bottom: 12px;'>Siste kvartal</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 18px; margin-bottom: 12px;'>Siste 12 måneder (TTM)</h3>", unsafe_allow_html=True)
         for label, value, term_key in metrics_right:
             render_metric_row(label, value, term_key)
 
