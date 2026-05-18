@@ -547,9 +547,14 @@ def render_home():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Ai ai - markedsoppsummering
+    # Ai ai - markedsoppsummering med ekte kursdata
     with st.spinner("Henter dagens markedsoppsummering..."):
-        briefing = get_market_briefing()
+        market_data = []
+        for t in st.session_state.fleet:
+            co = COMPANIES[t]
+            p, _, pct_val = get_price_data(co["yahoo_ticker"])
+            market_data.append({"ticker": t, "name": co["name"], "sector": co["sector"], "price": p, "pct": pct_val})
+        briefing = get_market_briefing(market_data)
         render_aiai_card("Ai ai — markedet i dag", briefing)
 
     # Info om ankerflåten
@@ -907,9 +912,9 @@ def render_company():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. AI AI - SELSKAPSANALYSE
+    # 2. AI AI - SELSKAPSANALYSE med ekte kursdata
     with st.spinner(f"Henter dagens analyse for {ticker}..."):
-        briefing = get_company_briefing(ticker, co["name"], co["sector"])
+        briefing = get_company_briefing(ticker, co["name"], co["sector"], price, pct)
         render_aiai_card(f"Ai ai — {co['name'].split(' ')[0]}", briefing)
 
     # 3. FANER

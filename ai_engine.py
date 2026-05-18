@@ -19,7 +19,7 @@ load_dotenv()
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-MODEL = "claude-sonnet-4-5"
+MODEL = "claude-sonnet-4-6"
 
 # Initialiser Anthropic-klienten (henter API-nøkkel fra .env automatisk)
 client = Anthropic()
@@ -60,34 +60,41 @@ def _save_cache(key: str, content: str):
 # MARKEDSOPPSUMMERING (Ai ai på forsiden)
 # ============================================================
 
-def get_market_briefing() -> str:
+def get_market_briefing(market_data: list | None = None) -> str:
     """Henter daglig markedsoppsummering for Oslo Børs.
 
-    Cacher resultatet i 12 timer for å unngå unødige API-kall.
+    market_data: liste med dicts {ticker, name, sector, price, pct} — ekte kursdata fra yfinance.
+    Cacher resultatet i 1 time.
     """
-    today = datetime.now().strftime("%Y-%m-%d-%H")
-    # Cache key bare på dato (ikke time) — fornyes hver 12 time
-    date_key = datetime.now().strftime("%Y-%m-%d")
-    half_day = "morning" if datetime.now().hour < 12 else "afternoon"
-    cache_key = f"market_{date_key}_{half_day}"
+    cache_key = f"market_{datetime.now().strftime('%Y-%m-%d-%H')}"
 
-    cached = _load_cache(cache_key, max_age_hours=12)
+    cached = _load_cache(cache_key, max_age_hours=1)
     if cached:
         return cached
 
-    prompt = """Du er Ai ai - en AI-finansassistent som gir daglige markedsoppsummeringer for Oslo Børs til norske investorer.
+    data_text = ""
+    if market_data:
+        lines = []
+        for d in market_data:
+            if d["price"] is not None and d["pct"] is not None:
+                sign = "+" if d["pct"] > 0 else ""
+                lines.append(
+                    f"- {d['ticker']} ({d['name']}, {d['sector']}): "
+                    f"{d['price']:.2f} kr  {sign}{d['pct']:.2f}% i dag"
+                )
+        if lines:
+            data_text = "\n\nAktuelle kursdata hentet akkurat nå:\n" + "\n".join(lines)
+
+    prompt = f"""Du er Ai ai - en AI-finansassistent som gir daglige markedsoppsummeringer for Oslo Børs til norske investorer.{data_text}
 
 Skriv en kort (80-120 ord), informativ oppsummering på norsk som dekker:
-- Hovedindeksen (OSEBX) sin generelle utvikling i dag
-- De viktigste sektorene som beveger seg (positivt eller negativt)
-- Minst ett eller to nøkkelselskaper med konkret prisendring
-- En makrofaktor som påvirker dagens handel (olje, rente, valuta, etc.)
-- Eventuelle viktige hendelser (rapporter, utbytter, oppkjøp)
+- Hvilke selskaper og sektorer som stiger eller faller mest i dag (bruk tallene over)
+- En makrofaktor som sannsynlig påvirker dagens bevegelser (olje, rente, valuta, etc.)
+- Eventuelle mønstre på tvers av sektorene
 
 Skriv som erfaren finansjournalist - informativ, presis, ikke sensasjonell.
 Ikke bruk overskrift. Bare løpende tekst.
-
-Siden dette er en demo og du ikke har sanntidsdata, bruk realistiske markedsdata for en typisk handelsdag på Oslo Børs. Det er viktig at teksten gir naturlig sammenheng. Brukeren forstår at dette er demo og ikke ekte sanntidsdata."""
+{"Basér analysen på kursdata oppgitt over — dette er ekte tall." if data_text else "Ingen kursdata tilgjengelig — gi en generell kommentar om Oslo Børs i dag."}"""
 
     try:
         response = client.messages.create(
@@ -106,46 +113,54 @@ Siden dette er en demo og du ikke har sanntidsdata, bruk realistiske markedsdata
 # SELSKAPSANALYSE (Ai ai på selskapssiden)
 # ============================================================
 
-def get_company_briefing(ticker: str, name: str, sector: str) -> str:
+def get_company_briefing(
+    ticker: str,
+    name: str,
+    sector: str,
+    price: float | None = None,
+    pct: float | None = None,
+) -> str:
     """Henter dagens analyse for et spesifikt selskap.
 
-    Cacher resultatet i 12 timer per selskap.
+    price/pct: ekte kursdata fra yfinance.
+    Cacher resultatet i 1 time per selskap.
     """
-    date_key = datetime.now().strftime("%Y-%m-%d")
-    half_day = "morning" if datetime.now().hour < 12 else "afternoon"
-    cache_key = f"company_{ticker}_{date_key}_{half_day}"
+    cache_key = f"company_{ticker}_{datetime.now().strftime('%Y-%m-%d-%H')}"
 
-    cached = _load_cache(cache_key, max_age_hours=12)
+    cached = _load_cache(cache_key, max_age_hours=1)
     if cached:
         return cached
 
-    # Hent ekstra kontekst fra config hvis tilgjengelig
+    price_text = ""
+    if price is not None and pct is not None:
+        sign = "+" if pct > 0 else ""
+        price_text = f"\n\nAktuelle kursdata: {price:.2f} kr  ({sign}{pct:.2f}% i dag)"
+
     try:
         from config import MACRO_FACTORS, COMPANY_FACTORS
         macro = MACRO_FACTORS.get(ticker, [])
         company = COMPANY_FACTORS.get(ticker, [])
-
         factors_text = ""
         if macro or company:
             factors_text = "\n\nViktige faktorer å hensynta:\n"
-            for f in (macro + company)[:6]:  # max 6 faktorer for å holde prompten kompakt
+            for f in (macro + company)[:6]:
                 factors_text += f"- {f['text']}: {f['sub']} (effekt: {f['impact']})\n"
     except Exception:
         factors_text = ""
 
+    grounded = "Basér analysen på kursdata oppgitt over — dette er ekte tall." if price_text else ""
+
     prompt = f"""Du er Ai ai - en AI-finansanalytiker som gir kortfattede selskapsoppdateringer til norske investorer.
 
-Generer en kort (70-110 ord) analyse på norsk for {name} ({ticker}) som handles på Oslo Børs i sektoren {sector}.{factors_text}
+Generer en kort (70-110 ord) analyse på norsk for {name} ({ticker}) som handles på Oslo Børs i sektoren {sector}.{price_text}{factors_text}
 
 Oppsummeringen skal:
-- Forklare hva som rører seg rundt selskapet akkurat nå
-- Nevne én eller to konkrete drivere (kvartalsrapport, sektor-trend, makro)
+- Kommentere dagens kursutvikling konkret (bruk tallene over)
+- Nevne én eller to sannsynlige drivere bak bevegelsen
 - Identifisere én hovedrisiko brukeren bør være oppmerksom på
 - Ha en informativ, rolig tone - ikke sensasjonell
 
-Ikke bruk overskrift. Bare løpende tekst. Skriv som om dette er en oppdatering for i dag.
-
-Siden dette er en demo bruk realistiske data for selskapet. Brukeren forstår at dette ikke er sanntidsdata."""
+Ikke bruk overskrift. Bare løpende tekst. {grounded}"""
 
     try:
         response = client.messages.create(
