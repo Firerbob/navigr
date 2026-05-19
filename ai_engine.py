@@ -258,6 +258,51 @@ Svara kort (60-120 ord) på SVENSKA. Var konkret, informativ och pedagogisk. Anv
 # AI AI FÖRKLARAR DAGENS RÖRELSE
 # ============================================================
 
+def get_company_deepdive(ticker: str, name: str, sector: str, about: str) -> str:
+    """Detaljert AI-generert deep-dive om bolaget. Cachas 30 dagar."""
+    cache_key = f"deepdive_{ticker}"
+    cached = _load_cache(cache_key, max_age_hours=720)
+    if cached:
+        return cached
+
+    prompt = f"""Du är Ai ai - en finansguide för svenska investerare.
+
+Skriv en detaljerad men lättfattlig "djupdykning" om {name} ({ticker}) på Oslo Børs i sektorn {sector} på SVENSKA.
+
+Bolagsbeskrivning: {about}
+
+Strukturera svaret med dessa rubriker (använd ## för rubrik):
+
+## Vad gör bolaget?
+2-3 meningar i klar, enkel svenska. Vad producerar eller säljer de? Vem är kunderna?
+
+## Hur tjänar de pengar?
+Förklara affärsmodellen pedagogiskt. Vilka är de viktigaste intäktskällorna? Är det cykliskt eller stabilt?
+
+## Var är de starka?
+Konkurrensfördelar och marknadsposition. Vad gör bolaget unikt?
+
+## Vad är riskerna?
+3-4 huvudrisker investerare bör känna till. Sektorrisk, regulatorisk, operationell.
+
+## Historia i korthet
+Nyckelhändelser och milstolpar — kort tidslinje.
+
+Total ca 250-350 ord. Skriv som en kunnig vän som förklarar — engagerande, inte torrt."""
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        _save_cache(cache_key, text)
+        return text
+    except Exception as e:
+        return f"(Ai ai kunde inte generera djupdykning: {e})"
+
+
 def explain_move(ticker: str, name: str, sector: str,
                  price=None, pct=None) -> str:
     """Förklarar varför aktien rör sig som den gör idag. Cachas 1 timme."""

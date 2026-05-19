@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 from config import COMPANIES, INITIAL_FLEET, MACRO_FACTORS, COMPANY_FACTORS, COMPETITORS
-from ai_engine import get_market_briefing, get_company_briefing, get_did_you_know, ask_ai, explain_move
+from ai_engine import get_market_briefing, get_company_briefing, get_did_you_know, ask_ai, explain_move, get_company_deepdive
 from glossary import GLOSSARY, LEVEL_LABELS, LEVEL_COLORS, search_terms, get_term
 
 SECTOR_COLORS = {
@@ -426,6 +426,15 @@ def get_earnings_dates_data(yahoo_ticker):
         return df if df is not None and not df.empty else None
     except Exception:
         return None
+
+
+@st.cache_data(ttl=1800)
+def get_news(yahoo_ticker):
+    try:
+        news = yf.Ticker(yahoo_ticker).news
+        return news if news else []
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=3600)
@@ -1051,30 +1060,30 @@ def render_company():
             render_aiai_card(f"Varför rör sig {ticker} idag?", explanation)
 
     # FLIKAR
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Nyckeltal", "📈 Kursgraf", "⚖️ Faktorer", "🔄 Konkurrenter",
-        "💎 Insider & analytiker", "📅 Tidslinje", "💬 Fråga Ai ai"
-    ])
+    tab_labels = [
+        "ℹ️ Djupdykning", "📰 Nyheter", "📊 Nyckeltal", "📈 Kursgraf",
+        "⚖️ Faktorer", "🔄 Konkurrenter", "💎 Insider & analytiker",
+        "📅 Tidslinje", "💬 Fråga Ai ai"
+    ]
+    tabs = st.tabs(tab_labels)
 
-    with tab1:
+    with tabs[0]:
+        render_deepdive(ticker, co)
+    with tabs[1]:
+        render_news(ticker, co)
+    with tabs[2]:
         render_key_metrics(ticker)
-
-    with tab2:
+    with tabs[3]:
         render_price_chart(co["yahoo_ticker"], ticker)
-
-    with tab3:
+    with tabs[4]:
         render_factors(ticker)
-
-    with tab4:
+    with tabs[5]:
         render_competitors(ticker)
-
-    with tab5:
+    with tabs[6]:
         render_insider_analyst(ticker, co)
-
-    with tab6:
+    with tabs[7]:
         render_timeline(ticker, co)
-
-    with tab7:
+    with tabs[8]:
         render_ask_ai(ticker, co, price, pct)
 
     # Footer disclaimer
@@ -1231,6 +1240,96 @@ def render_competitors(ticker):
         use_container_width=True,
         hide_index=True,
     )
+
+
+def render_deepdive(ticker, co):
+    """Djupdykning om bolaget med logo, AI-genererad detaljerad text."""
+    domain = co.get("domain", "")
+    logo_url = f"https://logo.clearbit.com/{domain}" if domain else None
+
+    col_logo, col_meta = st.columns([1, 3])
+    with col_logo:
+        if logo_url:
+            st.markdown(
+                f"<div style='background:#FFFBF3;border:1px solid #E8DFC8;border-radius:16px;"
+                f"padding:24px;display:flex;align-items:center;justify-content:center;min-height:140px;'>"
+                f"<img src='{logo_url}' style='max-width:100%;max-height:100px;' alt='{co['name']} logo' "
+                f"onerror=\"this.style.display='none'\"></div>",
+                unsafe_allow_html=True,
+            )
+    with col_meta:
+        st.markdown(f"""
+        <div style='padding:8px 0;'>
+            <h2 style='margin:0 0 8px 0;font-family:Fraunces,serif;font-size:26px;'>{co['name']}</h2>
+            <div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;'>
+                {render_sector_badge(co['sector'])}
+                <span style='background:#F2ECE0;color:#4A4640;padding:2px 9px;border-radius:100px;font-size:11px;font-weight:500;'>📍 {co['hq']}</span>
+                <span style='background:#F2ECE0;color:#4A4640;padding:2px 9px;border-radius:100px;font-size:11px;font-weight:500;'>📅 Grundat {co['founded']}</span>
+                <span style='background:#F2ECE0;color:#4A4640;padding:2px 9px;border-radius:100px;font-size:11px;font-weight:500;'>👥 {co['employees']} anställda</span>
+            </div>
+            {f'<a href="https://{domain}" target="_blank" style="color:#6B7E5C;text-decoration:none;font-size:13px;">🔗 {domain}</a>' if domain else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color: #E8DFC8; margin: 24px 0;'>", unsafe_allow_html=True)
+
+    with st.spinner(f"Ai ai förbereder en djupdykning om {co['name']}..."):
+        text = get_company_deepdive(ticker, co["name"], co["sector"], co["about"])
+    st.markdown(text)
+
+
+def render_news(ticker, co):
+    """Nyhetsström från Yahoo Finance."""
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>📰 Senaste nyheter</h3>", unsafe_allow_html=True)
+    st.caption(f"Artiklar och nyheter om {co['name']} från olika källor")
+
+    news = get_news(co["yahoo_ticker"])
+    if not news:
+        st.info("Inga nyheter tillgängliga just nu för detta bolag.")
+        return
+
+    for item in news[:15]:
+        content = item.get("content", item)
+        title = content.get("title", "")
+        if not title:
+            continue
+        publisher = content.get("provider", {}).get("displayName") if isinstance(content.get("provider"), dict) else content.get("publisher", "")
+        link = content.get("canonicalUrl", {}).get("url") if isinstance(content.get("canonicalUrl"), dict) else content.get("link", "")
+        if not link:
+            link = content.get("clickThroughUrl", {}).get("url", "") if isinstance(content.get("clickThroughUrl"), dict) else ""
+        pub_date = content.get("pubDate") or content.get("displayTime") or ""
+        if pub_date:
+            try:
+                from datetime import datetime as _dt
+                pub_date = _dt.fromisoformat(pub_date.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                pass
+        thumb = ""
+        thumbnail = content.get("thumbnail")
+        if isinstance(thumbnail, dict):
+            resolutions = thumbnail.get("resolutions", [])
+            if resolutions:
+                thumb = resolutions[0].get("url", "")
+            else:
+                thumb = thumbnail.get("originalUrl", "")
+
+        thumb_html = f"<img src='{thumb}' style='width:100px;height:80px;object-fit:cover;border-radius:8px;flex-shrink:0;' onerror=\"this.style.display='none'\">" if thumb else ""
+
+        st.markdown(f"""
+        <a href='{link}' target='_blank' style='text-decoration:none;color:inherit;'>
+        <div style='display:flex;gap:14px;background:#FFFBF3;border:1px solid #E8DFC8;border-radius:12px;padding:14px 16px;margin-bottom:10px;transition:all 0.15s;'
+             onmouseover="this.style.borderColor='#6B7E5C'" onmouseout="this.style.borderColor='#E8DFC8'">
+            {thumb_html}
+            <div style='flex:1;'>
+                <div style='font-family:Fraunces,serif;font-weight:500;font-size:15px;color:#2C2A26;margin-bottom:6px;line-height:1.35;'>{title}</div>
+                <div style='display:flex;gap:10px;font-size:11px;color:#7A746A;font-family:JetBrains Mono,monospace;'>
+                    <span>{publisher or '—'}</span>
+                    {f"<span>· {pub_date}</span>" if pub_date else ""}
+                </div>
+            </div>
+        </div>
+        </a>
+        """, unsafe_allow_html=True)
 
 
 def render_insider_analyst(ticker, co):
