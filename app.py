@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 from config import COMPANIES, INITIAL_FLEET, MACRO_FACTORS, COMPANY_FACTORS, COMPETITORS
-from ai_engine import get_market_briefing, get_company_briefing
+from ai_engine import get_market_briefing, get_company_briefing, get_did_you_know, ask_ai, explain_move
 from glossary import GLOSSARY, LEVEL_LABELS, LEVEL_COLORS, search_terms, get_term
 
 SECTOR_COLORS = {
@@ -401,6 +401,42 @@ def get_fundamentals(yahoo_ticker):
         return {}
 
 
+@st.cache_data(ttl=3600)
+def get_insider_transactions(yahoo_ticker):
+    try:
+        df = yf.Ticker(yahoo_ticker).insider_transactions
+        return df if df is not None and not df.empty else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_dividends_history(yahoo_ticker):
+    try:
+        divs = yf.Ticker(yahoo_ticker).dividends
+        return divs if divs is not None and not divs.empty else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_earnings_dates_data(yahoo_ticker):
+    try:
+        df = yf.Ticker(yahoo_ticker).earnings_dates
+        return df if df is not None and not df.empty else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def get_recommendations(yahoo_ticker):
+    try:
+        df = yf.Ticker(yahoo_ticker).recommendations
+        return df if df is not None and not df.empty else None
+    except Exception:
+        return None
+
+
 def _fmt_mrd(val, currency=""):
     if val is None:
         return "—"
@@ -592,6 +628,19 @@ def render_home():
         briefing = get_market_briefing(market_data)
         render_aiai_card("Ai ai — marknaden idag", briefing)
 
+    # Dagens stigande och fallande
+    render_top_movers(market_data)
+
+    # Visste du? - daglig fakta
+    with st.spinner("Hämtar dagens fakta..."):
+        fact = get_did_you_know()
+    st.markdown(f"""
+    <div style='background: linear-gradient(135deg, #F5E8D0 0%, #DDE5D2 100%); border-radius: 16px; padding: 22px 26px; margin-bottom: 20px;'>
+        <div style='display: inline-block; background: #6B5B2C; color: #FFFBF3; padding: 4px 11px; border-radius: 100px; font-family: Fraunces, serif; font-weight: 600; font-size: 12px; margin-bottom: 12px;'>💡 Visste du?</div>
+        <div style='font-family: Inter, sans-serif; font-size: 15px; line-height: 1.65; color: #4A4640;'>{fact}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     # Info om Ankrarflottan
     st.markdown("""
     <div style='background: #FFFBF3; border: 1px solid #E8DFC8; border-radius: 16px; padding: 18px 22px; margin-bottom: 20px;'>
@@ -608,6 +657,44 @@ def render_home():
         st.warning("Du har inga bolag i din Ankrarflottan. Gå till **Utforska** för att kasta ankare på ett bolag.")
     else:
         render_fleet_table(st.session_state.fleet, allow_remove=True)
+
+
+def render_top_movers(market_data):
+    """Visar dagens topp 3 stigande och topp 3 fallande."""
+    valid = [d for d in market_data if d.get("pct") is not None]
+    if not valid:
+        return
+    sorted_data = sorted(valid, key=lambda x: x["pct"], reverse=True)
+    winners = sorted_data[:3]
+    losers = sorted(sorted_data[-3:], key=lambda x: x["pct"])
+
+    st.markdown("### Dagens rörelser i din flotta")
+    cols = st.columns(2)
+
+    def _card(d, color_bg, color_text):
+        sign = "+" if d["pct"] > 0 else ""
+        return (
+            f"<div style='display:flex;align-items:center;justify-content:space-between;"
+            f"background:#FFFBF3;border:1px solid #E8DFC8;border-radius:10px;"
+            f"padding:10px 14px;margin-bottom:6px;'>"
+            f"<div><div style='font-family:Fraunces,serif;font-weight:500;font-size:14px;'>{d['ticker']}</div>"
+            f"<div style='font-size:11px;color:#7A746A;'>{d['name']}</div></div>"
+            f"<div style='background:{color_bg};color:{color_text};padding:4px 10px;"
+            f"border-radius:100px;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:500;'>"
+            f"{sign}{d['pct']:.2f}%</div></div>"
+        )
+
+    with cols[0]:
+        st.markdown("<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#2F6B3E;margin-bottom:8px;'>📈 Stigande</div>", unsafe_allow_html=True)
+        for d in winners:
+            st.markdown(_card(d, "#DCEBDD", "#2F6B3E"), unsafe_allow_html=True)
+
+    with cols[1]:
+        st.markdown("<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#8A1F1F;margin-bottom:8px;'>📉 Fallande</div>", unsafe_allow_html=True)
+        for d in losers:
+            st.markdown(_card(d, "#F0DBDB", "#8A1F1F"), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
 
 def render_fleet_table(tickers, allow_remove=True):
@@ -952,8 +1039,22 @@ def render_company():
         briefing = get_company_briefing(ticker, co["name"], co["sector"], price, pct)
         render_aiai_card(f"Ai ai — {co['name'].split(' ')[0]}", briefing)
 
-    # 3. FLIKAR
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Nyckeltal", "📈 Kursgraf", "⚖️ Faktorer", "🔄 Konkurrenter"])
+    # "Varför?" - förklarar dagens rörelse
+    if pct is not None:
+        exp_col1, exp_col2 = st.columns([1, 5])
+        with exp_col1:
+            if st.button("🤔 Varför?", key=f"explain_{ticker}", help="Låt Ai ai förklara dagens kursrörelse"):
+                st.session_state[f"show_explain_{ticker}"] = True
+        if st.session_state.get(f"show_explain_{ticker}"):
+            with st.spinner("Ai ai funderar..."):
+                explanation = explain_move(ticker, co["name"], co["sector"], price, pct)
+            render_aiai_card(f"Varför rör sig {ticker} idag?", explanation)
+
+    # FLIKAR
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 Nyckeltal", "📈 Kursgraf", "⚖️ Faktorer", "🔄 Konkurrenter",
+        "💎 Insider & analytiker", "📅 Tidslinje", "💬 Fråga Ai ai"
+    ])
 
     with tab1:
         render_key_metrics(ticker)
@@ -966,6 +1067,15 @@ def render_company():
 
     with tab4:
         render_competitors(ticker)
+
+    with tab5:
+        render_insider_analyst(ticker, co)
+
+    with tab6:
+        render_timeline(ticker, co)
+
+    with tab7:
+        render_ask_ai(ticker, co, price, pct)
 
     # Footer disclaimer
     st.markdown("""
@@ -1121,6 +1231,140 @@ def render_competitors(ticker):
         use_container_width=True,
         hide_index=True,
     )
+
+
+def render_insider_analyst(ticker, co):
+    """Visar insiderhandel och analytikerrekommendationer."""
+    yt = co["yahoo_ticker"]
+    info = get_fundamentals(yt)
+
+    # ANALYTIKER
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>🎯 Analytikermål</h3>", unsafe_allow_html=True)
+    st.caption("Vad professionella analytiker tycker om aktien")
+
+    rec = info.get("recommendationKey", "—")
+    rec_label = {
+        "strong_buy": "Stark köp", "buy": "Köp", "hold": "Behåll",
+        "sell": "Sälj", "strong_sell": "Stark sälj", "underperform": "Undervikt",
+    }.get(rec, rec.capitalize() if isinstance(rec, str) else "—")
+    n_analysts = info.get("numberOfAnalystOpinions", "—")
+    target_mean = info.get("targetMeanPrice")
+    target_high = info.get("targetHighPrice")
+    target_low = info.get("targetLowPrice")
+    currency = info.get("currency", "")
+
+    a_cols = st.columns(4)
+    with a_cols[0]:
+        st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;'>Konsensus</div><div style='font-family:Fraunces,serif;font-size:22px;font-weight:500;margin-top:4px;'>{rec_label}</div>", unsafe_allow_html=True)
+    with a_cols[1]:
+        st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;'>Analytiker</div><div style='font-family:Fraunces,serif;font-size:22px;font-weight:500;margin-top:4px;'>{n_analysts}</div>", unsafe_allow_html=True)
+    with a_cols[2]:
+        tm = f"{target_mean:.0f} {currency}" if target_mean else "—"
+        st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;'>Median kursmål</div><div style='font-family:Fraunces,serif;font-size:22px;font-weight:500;margin-top:4px;'>{tm}</div>", unsafe_allow_html=True)
+    with a_cols[3]:
+        rng = f"{target_low:.0f}–{target_high:.0f}" if target_low and target_high else "—"
+        st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7A746A;'>Spann</div><div style='font-family:Fraunces,serif;font-size:22px;font-weight:500;margin-top:4px;'>{rng}</div>", unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color: #E8DFC8; margin: 28px 0;'>", unsafe_allow_html=True)
+
+    # INSIDERHANDEL
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>💎 Insiderhandel</h3>", unsafe_allow_html=True)
+    st.caption("När ledning och styrelse handlar egna aktier — ett signalvärde")
+
+    df = get_insider_transactions(yt)
+    if df is None or df.empty:
+        st.info("Ingen insiderdata tillgänglig för detta bolag.")
+    else:
+        show = df.head(10).copy()
+        show.columns = [str(c) for c in show.columns]
+        st.dataframe(show, use_container_width=True, hide_index=True)
+
+
+def render_timeline(ticker, co):
+    """Visar tidslinje med utdelningar och rapporter."""
+    yt = co["yahoo_ticker"]
+
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>📅 Kommande rapporter</h3>", unsafe_allow_html=True)
+    st.caption("Datum då bolaget rapporterar sina resultat")
+
+    ed = get_earnings_dates_data(yt)
+    if ed is None or ed.empty:
+        st.info("Ingen rapportkalender tillgänglig.")
+    else:
+        show = ed.head(8).copy()
+        show.index = show.index.strftime("%Y-%m-%d")
+        show.columns = [str(c) for c in show.columns]
+        st.dataframe(show, use_container_width=True)
+
+    st.markdown("<hr style='border-color: #E8DFC8; margin: 28px 0;'>", unsafe_allow_html=True)
+
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>💰 Utdelningshistorik</h3>", unsafe_allow_html=True)
+    st.caption("Utdelningar bolaget har betalat ut över tid")
+
+    divs = get_dividends_history(yt)
+    if divs is None or len(divs) == 0:
+        st.info("Ingen utdelningshistorik tillgänglig.")
+    else:
+        recent = divs.tail(20)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=recent.index, y=recent.values,
+            marker=dict(color="#6B7E5C"),
+            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.2f} kr<extra></extra>",
+        ))
+        fig.update_layout(
+            template="simple_white", height=320,
+            margin=dict(l=20, r=20, t=20, b=20),
+            plot_bgcolor="#FFFBF3", paper_bgcolor="#FFFBF3",
+            font=dict(family="Inter, sans-serif"),
+            xaxis=dict(showgrid=False, title=""),
+            yaxis=dict(gridcolor="#E8DFC8", title="Utdelning per aktie"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def render_ask_ai(ticker, co, price, pct):
+    """Fritext-Q&A med Ai ai."""
+    st.markdown("<h3 style='font-family: Fraunces, serif; font-size: 20px; margin-bottom: 6px;'>💬 Fråga Ai ai</h3>", unsafe_allow_html=True)
+    st.caption(f"Ställ valfri fråga om {co['name']} — Ai ai svarar på svenska")
+
+    examples = [
+        f"Vad är största risken med {co['name'].split(' ')[0]}?",
+        "Hur tjänar bolaget pengar?",
+        "Är aktien dyr eller billig just nu?",
+        "Vilka är de viktigaste konkurrenterna?",
+    ]
+    ex_cols = st.columns(len(examples))
+    for i, ex in enumerate(examples):
+        with ex_cols[i]:
+            if st.button(ex, key=f"ex_{ticker}_{i}", use_container_width=True):
+                st.session_state[f"q_{ticker}"] = ex
+
+    question = st.text_area(
+        "Din fråga",
+        value=st.session_state.get(f"q_{ticker}", ""),
+        placeholder=f"T.ex. 'Varför har {ticker} stigit så mycket i år?'",
+        key=f"qinput_{ticker}",
+        height=80,
+        label_visibility="collapsed",
+    )
+
+    if st.button("Skicka fråga", type="primary", key=f"send_{ticker}"):
+        if question.strip():
+            with st.spinner("Ai ai funderar..."):
+                answer = ask_ai(question, ticker, co["name"], co["sector"], price, pct)
+            st.session_state[f"a_{ticker}"] = (question, answer)
+            st.session_state[f"q_{ticker}"] = ""
+
+    saved = st.session_state.get(f"a_{ticker}")
+    if saved:
+        q, a = saved
+        st.markdown(f"""
+        <div style='background:#F2ECE0;border-left:3px solid #6B7E5C;border-radius:0 8px 8px 0;padding:14px 18px;margin-top:18px;margin-bottom:10px;font-family:Fraunces,serif;font-style:italic;font-size:14px;color:#4A4640;'>
+            Du frågade: "{q}"
+        </div>
+        """, unsafe_allow_html=True)
+        render_aiai_card("Ai ai svarar", a)
 
 
 # ============================================================
